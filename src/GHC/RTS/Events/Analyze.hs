@@ -2,6 +2,7 @@
 module Main where
 
 import Control.Monad (when, forM_)
+import Control.Lens
 import Data.Maybe (isNothing)
 import System.FilePath (replaceExtension, takeFileName)
 import Text.Parsec.String (parseFromFile)
@@ -47,9 +48,9 @@ main = do
 
     forM_ (zip [0..] analyses) $ \ (i,analysis) -> do
 
-      let quantized = quantize optionsNumBuckets analysis
-          totals    = Totals.createReport analysis (fmap makeRegex <$> totalsScript)
-          timed     = Timed.createReport analysis quantized (fmap makeRegex <$> timedScript)
+      let quantized = set events (quantize optionsNumBuckets analysis) analysis
+          totals    = Totals.createReport quantized (fmap makeRegex <$> totalsScript)
+          timed     = Timed.createReport quantized (fmap makeRegex <$> timedScript)
 
       writeReport optionsGenerateTotalsText
                   totalsScriptName
@@ -59,7 +60,7 @@ main = do
       writeReport optionsGenerateTimedSVG
                   timedScriptName
                   (prefixAnalysisNumber i "timed.svg")
-                  (TimedSVG.writeReport options quantized timed)
+                  (TimedSVG.writeReport options (quantized ^. events) timed)
 
       writeReport optionsGenerateTimedText
                   timedScriptName

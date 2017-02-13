@@ -16,6 +16,7 @@ module GHC.RTS.Events.Analyze.Types (
   , threadIds
   , ThreadInfo
   , EventAnalysis(..)
+  , Events
   , AnalysisState(..)
     -- ** EventAnalysis lenses
   , events
@@ -152,16 +153,18 @@ threadIds = Map.keys
 -- The default label for each thread is the thread ID
 type ThreadInfo = Map ThreadId (Timestamp, Timestamp, String)
 
+type Events = [(EventId, Timestamp, Timestamp)]
+
 -- | Analysis of a window (or the whole program run if there aren't any).
 -- The fields that we use as "accumulators" in `analyze` are strict so that we
 -- don't build up chains of EventAnalysis objects when we update it as we
 -- process the eventlog.
-data EventAnalysis = EventAnalysis {
+data EventAnalysis events = EventAnalysis {
     -- | Start and stop timestamps
     --
     -- For events that miss an end marker the @stop@ timestamp will be set to
     -- be equal to the @start@ timestamp
-    _events :: ![(EventId, Timestamp, Timestamp)]
+    _events :: !events
 
     -- | Window-specific thread info
   , _windowThreadInfo :: ThreadInfo
@@ -203,10 +206,10 @@ $(makeLenses ''EventAnalysis)
 -- and appends an 'EventAnalysis' per window.
 data AnalysisState = AnalysisState {
     _runningThreads :: RunningThreads
-  , _windowAnalyses :: [EventAnalysis]
+  , _windowAnalyses :: [EventAnalysis Events]
 }
 
-threadNameGetter :: ThreadId -> Traversal' EventAnalysis String
+threadNameGetter :: ThreadId -> Traversal' (EventAnalysis a) String
 threadNameGetter tid = windowThreadInfo . ix tid . _3
 
 $(makeLenses ''AnalysisState)

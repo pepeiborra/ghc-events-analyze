@@ -1,3 +1,4 @@
+{-# LANGUAGE PartialTypeSignatures #-}
 module GHC.RTS.Events.Analyze.Reports.Timed (
     Report
   , ReportFragment(..)
@@ -43,8 +44,8 @@ data ReportLine = ReportLineData {
   Report generation
 -------------------------------------------------------------------------------}
 
-createReport :: EventAnalysis -> Quantized -> Script Regex -> Report
-createReport analysis Quantized{..} = concatMap go
+createReport :: EventAnalysis Quantized -> Script Regex -> Report
+createReport analysis@EventAnalysis{_events = Quantized{..}} = concatMap go
   where
     go :: Command Regex -> [ReportFragment]
     go (Section title) =

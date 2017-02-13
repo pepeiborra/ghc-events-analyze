@@ -46,7 +46,7 @@ readEventLog  = throwLeftStr . readEventLogFromFile
   the analysis combines such events.
 -------------------------------------------------------------------------------}
 
-analyze :: Options -> EventLog -> [EventAnalysis]
+analyze :: Options -> EventLog -> [EventAnalysis [(EventId, Timestamp, Timestamp)]]
 analyze opts@Options{..} log =
     let AnalysisState _ analyses = execState (mapM_ analyzeEvent (sortedEvents log))
                                              (initialAnalysisState opts)
@@ -93,28 +93,28 @@ analyze opts@Options{..} log =
     stopId (UserMessage (prefix optionsUserStop -> Just e)) = Just $ parseUserEvent e
     stopId _                                                = Nothing
 
-ifInWindow :: State EventAnalysis () -> State EventAnalysis ()
+ifInWindow :: State (EventAnalysis a) () -> State (EventAnalysis a) ()
 ifInWindow m = do
   b <- use inWindow
   when b m
 
 -- Lift actions on the current analysis to the head of the list.
-cur :: State EventAnalysis a -> State AnalysisState a
+cur :: State (EventAnalysis Events) a -> State AnalysisState a
 cur m = do
   AnalysisState ts (h:t) <- get
   case runState m h of
     (r, h') -> put (AnalysisState ts (h':t)) >> return r
 
 -- We take the _first_ CapCreate to be the official startup time
-recordStartup :: Timestamp -> State EventAnalysis ()
+recordStartup :: Timestamp -> State (EventAnalysis a) ()
 recordStartup time = startup %= (<|> Just time)
 
 -- We take the last time of any event to be the official shutdown time
-recordShutdown :: Timestamp -> State EventAnalysis ()
+recordShutdown :: Timestamp -> State (EventAnalysis a) ()
 recordShutdown time =
     shutdown %= (\prevt'm -> let newtime = maybe time (max time) prevt'm in newtime `seq` Just newtime)
 
-recordEventStart :: EventId -> Timestamp -> State EventAnalysis ()
+recordEventStart :: EventId -> Timestamp -> State (EventAnalysis Events) ()
 recordEventStart eid start = do
     (oldValue, newOpen) <- Map.insertLookupWithKey push eid (start, 1) <$> use openEvents
     openEvents .= newOpen
@@ -128,7 +128,7 @@ recordEventStart eid start = do
       let count' = oldCount + 1
       in count' `seq` (oldStart, count')
 
-recordEventStop :: EventId -> Timestamp -> State EventAnalysis ()
+recordEventStop :: EventId -> Timestamp -> State (EventAnalysis Events) ()
 recordEventStop eid stop = do
     (newValue, newOpen) <- Map.updateLookupWithKey pop eid <$> use openEvents
     case newValue of
@@ -143,7 +143,7 @@ recordEventStop eid stop = do
       let count' = count - 1
       in count' `seq` Just (start, count')
 
-simulateUserEventsStopAt :: Timestamp -> State EventAnalysis ()
+simulateUserEventsStopAt :: Timestamp -> State (EventAnalysis Events) ()
 simulateUserEventsStopAt stop = do
     nowOpen <- Map.toList <$> use openEvents
     forM_ nowOpen $ \(eid, (start, _count)) -> case eid of
@@ -151,7 +151,7 @@ simulateUserEventsStopAt stop = do
       EventThread _ -> return ()
       EventUser _ _ -> events %= (:) (eid, start, stop)
 
-simulateUserEventsStartAt :: Timestamp -> State EventAnalysis ()
+simulateUserEventsStartAt :: Timestamp -> State (EventAnalysis a) ()
 simulateUserEventsStartAt newStart = openEvents %= Map.mapWithKey updUserEvent
   where
     updUserEvent :: EventId -> (Timestamp, Int) -> (Timestamp, Int)
@@ -185,7 +185,7 @@ recordThreadCreation tid start = do
     runningThreads . at tid .= Just label
 
 -- Record thread creation in current window
-recordWindowThreadCreation :: ThreadId -> Timestamp -> String -> State EventAnalysis ()
+recordWindowThreadCreation :: ThreadId -> Timestamp -> String -> State (EventAnalysis a) ()
 recordWindowThreadCreation tid start label =
     windowThreadInfo . at tid .=  Just (start, start, label)
 
@@ -205,7 +205,7 @@ recordThreadFinish tid stop = do
     cur $ ifInWindow $ recordWindowThreadFinish tid stop
     runningThreads . at tid .= Nothing
 
-recordWindowThreadFinish :: ThreadId -> Timestamp -> State EventAnalysis ()
+recordWindowThreadFinish :: ThreadId -> Timestamp -> State (EventAnalysis a) ()
 recordWindowThreadFinish tid stop =
     windowThreadInfo . at tid %= fmap updStop
   where
@@ -234,7 +234,7 @@ initialAnalysisState opts = AnalysisState {
   , _windowAnalyses = [initialEventAnalysis opts]
   }
 
-initialEventAnalysis :: Options -> EventAnalysis
+initialEventAnalysis :: Options -> (EventAnalysis [a])
 initialEventAnalysis opts = EventAnalysis {
     _events           = []
   , _windowThreadInfo = Map.empty
@@ -246,7 +246,7 @@ initialEventAnalysis opts = EventAnalysis {
   , _inWindow         = isNothing (optionsWindowEvent opts)
   }
 
-computeTotals :: [(EventId, Timestamp, Timestamp)] -> Map EventId Timestamp
+computeTotals :: Events -> Map EventId Timestamp
 computeTotals = go Map.empty
   where
     go :: Map EventId Timestamp
@@ -256,7 +256,7 @@ computeTotals = go Map.empty
     go !acc ((eid, start, stop) : es) =
       go (Map.insertWith (+) eid (stop - start) acc) es
 
-computeStarts :: [(EventId, Timestamp, Timestamp)] -> Map EventId Timestamp
+computeStarts :: Events -> Map EventId Timestamp
 computeStarts = go Map.empty
   where
     go :: Map EventId Timestamp
@@ -271,7 +271,7 @@ computeStarts = go Map.empty
 -------------------------------------------------------------------------------}
 
 -- | Lookup start time for a given event
-eventStart :: EventAnalysis -> EventId -> Timestamp
+eventStart :: (EventAnalysis a) -> EventId -> Timestamp
 eventStart EventAnalysis{..} eid =
     case Map.lookup eid eventStarts of
       Nothing -> error $ "eventStart: Invalid event ID " ++ show eid ++ ". "
@@ -279,11 +279,11 @@ eventStart EventAnalysis{..} eid =
       Just t  -> t
 
 -- | Lookup a total for a given event
-eventTotal :: EventAnalysis -> EventId -> Timestamp
+eventTotal :: (EventAnalysis a) -> EventId -> Timestamp
 eventTotal EventAnalysis{..} eid = fromMaybe 0 $ Map.lookup eid eventTotals
 
 -- | Compare event IDs
-compareEventIds :: EventAnalysis -> EventSort
+compareEventIds :: (EventAnalysis a) -> EventSort
                 -> EventId -> EventId -> Ordering
 compareEventIds analysis sort a b =
     case sort of
@@ -295,7 +295,7 @@ compareEventIds analysis sort a b =
   Quantization
 -------------------------------------------------------------------------------}
 
-quantize :: Int -> EventAnalysis -> Quantized
+quantize :: Int -> (EventAnalysis Events) -> Quantized
 quantize numBuckets EventAnalysis{..} = Quantized {
       quantTimes      = go Map.empty _events
     , quantThreadInfo = Map.map quantizeThreadInfo _windowThreadInfo

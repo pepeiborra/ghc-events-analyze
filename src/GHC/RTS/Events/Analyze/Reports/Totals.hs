@@ -42,7 +42,7 @@ data ReportLine = ReportLineData {
   Report generation
 -------------------------------------------------------------------------------}
 
-createReport :: EventAnalysis -> Script Regex -> Report
+createReport :: EventAnalysis a -> Script Regex -> Report
 createReport analysis@EventAnalysis{..} = concatMap go
   where
     go :: Command Regex -> [ReportFragment]
