@@ -1,6 +1,9 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
 module Main where
 
+import Control.DeepSeq
+import Control.Exception
 import Control.Monad (when, forM_)
 import Control.Lens
 import Data.Maybe (isNothing)
@@ -23,7 +26,11 @@ import GHC.RTS.Events.Analyze.Script.Standard
 main :: IO ()
 main = do
     options@Options{..} <- parseOptions
-    analyses            <- analyze options <$> readEventLog optionsInput
+    eventLog            <- readEventLog optionsInput
+    analyses            <- analyze options eventLog <$>
+      if optionsLazyParse
+         then readEventLog optionsInput
+         else pure eventLog
 
     (timedScriptName,  timedScript)  <- getScript optionsScriptTimed  defaultScriptTimed
     (totalsScriptName, totalsScript) <- getScript optionsScriptTotals defaultScriptTotals
@@ -46,10 +53,10 @@ main = do
           | isNothing optionsWindowEvent = filename
           | otherwise                    = show i ++ "." ++ filename
 
-    forM_ (zip [0..] analyses) $ \ (i,analysis) -> do
+    quantized_ <- evaluate $ force analyses
+    forM_ (zip [0..] quantized_) $ \ (i,quantized) -> do
 
-      let quantized = set events (quantize optionsNumBuckets analysis) analysis
-          totals    = Totals.createReport quantized (fmap makeRegex <$> totalsScript)
+      let totals    = Totals.createReport quantized (fmap makeRegex <$> totalsScript)
           timed     = Timed.createReport quantized (fmap makeRegex <$> timedScript)
 
       writeReport optionsGenerateTotalsText

@@ -111,6 +111,10 @@ parserOptions =
             , value 0.1
             , showDefault
             ])
+      <*> (switch $ mconcat [
+              long "lazy-parse"
+            , help "Lazily parse the eventlog to reduce memory usage"
+            ])
       <*> argument str (metavar "EVENTLOG")
     ))
 

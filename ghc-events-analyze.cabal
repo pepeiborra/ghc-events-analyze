@@ -42,7 +42,6 @@ executable ghc-events-analyze
   main-is:             GHC/RTS/Events/Analyze.hs
   other-modules:       GHC.RTS.Events.Analyze.Analysis
                        GHC.RTS.Events.Analyze.Options
-                       GHC.RTS.Events.Analyze.StrictState
                        GHC.RTS.Events.Analyze.Utils
                        GHC.RTS.Events.Analyze.Types
                        GHC.RTS.Events.Analyze.Script
@@ -67,7 +66,8 @@ executable ghc-events-analyze
                        regex-base,
                        regex-pcre-builtin,
                        -- No version: whatever is bundled with ghc
-                       template-haskell
+                       template-haskell,
+                       deepseq
 
   hs-source-dirs:      src
   default-language:    Haskell2010

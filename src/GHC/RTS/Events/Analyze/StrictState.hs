@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE StandaloneDeriving #-}
 -- | State monad which forces the state to whnf on every step
 {-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving, CPP #-}
 module GHC.RTS.Events.Analyze.StrictState (
@@ -16,6 +18,8 @@ module GHC.RTS.Events.Analyze.StrictState (
   , module Control.Monad.State.Strict
   ) where
 
+import Control.Lens
+import Control.Lens.Internal.Zoom
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.State.Strict (MonadState(..))
 import qualified Control.Monad.State.Strict as St
@@ -32,6 +36,9 @@ import Control.Applicative
 
 newtype StateT s m a = StateT { unStateT :: St.StateT s m a  }
   deriving (Functor, Applicative, Monad, MonadTrans, MonadIO)
+
+type instance Zoomed (StateT s m) = Focusing m
+instance Monad m => Zoom (StateT s m) (StateT t m) s t where zoom l = StateT . zoom l . unStateT
 
 runStateT :: StateT s m a -> s -> m (a, s)
 runStateT = St.runStateT . unStateT

@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TemplateHaskell #-}
 module GHC.RTS.Events.Analyze.Types (
     -- * Events
@@ -34,9 +36,11 @@ module GHC.RTS.Events.Analyze.Types (
   , ThreadId
   ) where
 
+import Control.DeepSeq
 import Control.Lens
 import Data.Char
 import Data.Map (Map)
+import GHC.Generics
 import GHC.RTS.Events (Timestamp, ThreadId)
 import qualified Data.Map as Map
 
@@ -66,7 +70,7 @@ data EventId =
 
     -- | Threads
   | EventThread ThreadId
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic, NFData)
 
 -- | The user-readable name for an event
 type EventLabel = String
@@ -130,6 +134,7 @@ data Options = Options {
   , optionsBucketWidth        :: Double
   , optionsBucketHeight       :: Double
   , optionsBorderWidth        :: Double -- '0' for no border
+  , optionsLazyParse          :: Bool
     -- Defined last to make defining the parser easier
   , optionsInput              :: FilePath
   }
@@ -164,7 +169,7 @@ data EventAnalysis events = EventAnalysis {
     --
     -- For events that miss an end marker the @stop@ timestamp will be set to
     -- be equal to the @start@ timestamp
-    _events :: !events
+    _events :: events
 
     -- | Window-specific thread info
   , _windowThreadInfo :: ThreadInfo
@@ -185,20 +190,20 @@ data EventAnalysis events = EventAnalysis {
     -- separately for separate HECs). We therefore record for each open event
     -- how many start events we have seen, and hence how many ends we need to
     -- see before counting the event as finished.
-  , _openEvents :: !(Map EventId (Timestamp, Int))
+  , _openEvents :: (Map EventId (Timestamp, Int))
 
     -- | Total amount of time per event (non-strict)
   , eventTotals :: Map EventId Timestamp
   , eventStarts :: Map EventId Timestamp
 
     -- | Timestamp of the Startup event
-  , _startup :: !(Maybe Timestamp)
+  , _startup :: (Maybe Timestamp)
 
     -- | Timestamp of the Shutdown event
-  , _shutdown :: !(Maybe Timestamp)
+  , _shutdown :: (Maybe Timestamp)
   , _inWindow :: Bool
   }
-  deriving Show
+  deriving (Generic, Show, NFData)
 
 $(makeLenses ''EventAnalysis)
 
@@ -235,4 +240,4 @@ data Quantized = Quantized {
     -- | Size of each bucket
   , quantBucketSize :: Timestamp
   }
-  deriving Show
+  deriving (Show, Generic, NFData)

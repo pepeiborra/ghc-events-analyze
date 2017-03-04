@@ -1,3 +1,4 @@
+{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE FlexibleContexts, CPP #-}
 module GHC.RTS.Events.Analyze.Analysis (
     -- * Auxiliary
@@ -14,7 +15,8 @@ module GHC.RTS.Events.Analyze.Analysis (
 
 import Prelude hiding (log)
 import Control.Applicative ((<|>))
-import Control.Lens ((%=), (.=), at, use)
+import Control.DeepSeq
+import Control.Lens ((^.), (%=), (.=), at, use)
 import Control.Monad (forM_, when, void)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Map.Strict (Map)
@@ -25,8 +27,9 @@ import qualified Data.Map.Strict as Map
 import Control.Applicative ((<$>))
 #endif
 
+
 import GHC.RTS.Events.Analyze.Utils
-import GHC.RTS.Events.Analyze.StrictState (State, execState, put, get, runState)
+import Control.Monad.State.Lazy (State, execState, put, get, runState)
 import GHC.RTS.Events.Analyze.Types
 import GHC.RTS.Events.Analyze.Script
 
@@ -46,15 +49,29 @@ readEventLog  = throwLeftStr . readEventLogFromFile
   the analysis combines such events.
 -------------------------------------------------------------------------------}
 
-analyze :: Options -> EventLog -> [EventAnalysis [(EventId, Timestamp, Timestamp)]]
-analyze opts@Options{..} log =
+data AnalyzeMode = FirstPass | SecondPass
+
+analyze :: Options -> EventLog -> EventLog -> [EventAnalysis Quantized]
+analyze opts@Options{..} log log' = reverse $ zipWith quant first second
+  where
+    first  = force $ analyzeGen FirstPass opts log
+    second = analyzeGen SecondPass opts log'
+    quant f s = let anal = f{ _events = s ^. events }
+                in s{ _events = quantize optionsNumBuckets anal }
+
+analyzeGen :: AnalyzeMode -> Options -> EventLog -> [EventAnalysis Events]
+analyzeGen mode opts@Options{..} log =
     let AnalysisState _ analyses = execState (mapM_ analyzeEvent (sortedEvents log))
                                              (initialAnalysisState opts)
-    in reverse
+    in
        [ analysis { eventTotals = computeTotals (_events analysis)
                   , eventStarts = computeStarts (_events analysis) }
        | analysis <- (if length analyses > 1 then drop 1 else id) analyses ]
   where
+    isSecondPass
+      | FirstPass  <- mode = False
+
+      | SecondPass <- mode = True
     isWindowEvent :: EventId -> Bool
     isWindowEvent = case optionsWindowEvent of
                       Nothing -> const False
@@ -75,10 +92,12 @@ analyze opts@Options{..} log =
         (finishThread -> Just tid) -> recordThreadFinish tid time
         -- Start/end events
         ThreadLabel tid l          -> labelThread tid l
-        (startId -> Just eid)      -> do cur $ ifInWindow $ recordEventStart eid time
-                                         when (isWindowEvent eid) $ recordWindowStart time
-        (stopId  -> Just eid)      -> do when (isWindowEvent eid) $ recordWindowStop opts time
-                                         cur $ ifInWindow $ recordEventStop eid time
+        (startId -> Just eid)
+          | isSecondPass -> do cur $ ifInWindow $ recordEventStart eid time
+                               when (isWindowEvent eid) $ recordWindowStart time
+        (stopId  -> Just eid)
+          | isSecondPass -> do when (isWindowEvent eid) $ recordWindowStop opts time
+                               cur $ ifInWindow $ recordEventStop eid time
         _                          -> return ()
 
     startId :: EventInfo -> Maybe EventId
@@ -335,6 +354,7 @@ quantize numBuckets EventAnalysis{..} = Quantized {
     delta startBucket endBucket start end b
       | b == startBucket && startBucket == endBucket =
          t2d (end - start) / t2d bucketSize
+
       | b == startBucket =
          t2d (bucketEnd b - start) / t2d bucketSize
       | b == endBucket =
